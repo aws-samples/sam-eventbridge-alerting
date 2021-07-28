@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  sam-eventbridge-publisher
+
+  SAM Template for Source Account - Publisher Lambda Function & Event Bus Rule for Cross-Account CloudWatch & Custom Events
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 120
+
+Parameters:
+  DestinationAccountId:
+    Description: Destination Account Id where CloudWatch Events will be sent
+    Type: String
+    Default: 'DESTINATIONACCOUNTID'
+
+Resources:
+  # EventBridge Rules
+  CloudWatchEventsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Send event data from this account to a custom Event Bus in the target LoggingAccount
+      EventPattern:
+        source: 
+          - "aws.cloudwatch"
+        detail-type: 
+          - "CloudWatch Alarm State Change"
+      State: ENABLED
+      Targets:
+        - RoleArn: !GetAtt EventBridgePublisherEventBusRole.Arn
+          Id: 'CloudWatchEventsToDestinationAccountId'
+          Arn: !Sub 'arn:aws:events:${AWS::Region}:${DestinationAccountId}:event-bus/EventBus-for-CloudWatchEvents'
+
+  CustomEventsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Send event data from this account to a custom Event Bus in the target LoggingAccount
+      EventPattern:
+        source: 
+          - "customevent"
+      State: ENABLED
+      Targets:
+        - RoleArn: !GetAtt EventBridgePublisherEventBusRole.Arn
+          Id: !Sub 'CustomEventsToDestinationAccountId'
+          Arn: !Sub 'arn:aws:events:${AWS::Region}:${DestinationAccountId}:event-bus/EventBus-for-CustomEvents'
+
+  # Cross-Account EventBridge IAM Role (Allow events:PutEvents on Destionation Account Event Bus!)
+  EventBridgePublisherEventBusRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - events.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: PutEventsOnUnifiedAlertingEventBus
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'events:PutEvents'
+                Resource: !Sub 'arn:aws:events:${AWS::Region}:${DestinationAccountId}:event-bus/EventBus-for-*'
+
+  EventBridgePublisherFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eventbridge/eventbridge_publisher
+      Handler: app.lambda_handler
+      Runtime: python3.8
+      Policies:
+        - EventBridgePutEventsPolicy:
+            EventBusName: 'default'
+
+Outputs:
+  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
+  # Find out more about other implicit resources you can reference within SAM
+  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
+  EventBridgePublisherFunction:
+    Description: "EventBridge Alerting Lambda Function ARN"
+    Value: !Ref EventBridgePublisherFunction
+  EventBridgePublisherFunctionIamRole:
+    Description: "Implicit IAM Role created for EventBridge Alerting function"
+    Value: !GetAtt EventBridgePublisherFunction.Arn
+  CloudWatchEventsRuleARN:
+    Description: ARN of the CloudWatch Events/EventBridge Event Rule in this account which sends events to the destination
+    Value: !GetAtt CloudWatchEventsRule.Arn
+  CustomEventsRuleARN:
+    Description: ARN of the Custom Events/EventBridge Event Rule in this account which sends events to the destination
+    Value: !GetAtt CustomEventsRule.Arn 
+  EventBridgePublisherEventBusRole:
+    Description: IAM Role used be Event Rule
+    Value: !GetAtt EventBridgePublisherEventBusRole.Arn

@@ -1,0 +1,89 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  sam-eventbridge-alerting
+
+  SAM Template for Destination Account - Lambda Function Proc using Amazon EventBridge Cross-Account Event Bus / Event Bus Rules
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 3
+
+Parameters:
+  SourceAccountId:
+    Type: String
+    Description: Source Account Id sending AWS Events
+    Default: 'SOURCEACCOUNTID'
+
+Resources:
+  # Amazon EventBridge using Event Bus Rules          
+  CloudWatchEventBus: 
+    Type: AWS::Events::EventBus
+    Properties: 
+        Name: "EventBus-for-CloudWatchEvents"
+
+  CustomEventBus: 
+    Type: AWS::Events::EventBus
+    Properties: 
+        Name: "EventBus-for-CustomEvents" 
+
+  CloudWatchEventBusPolicy: 
+    Type: AWS::Events::EventBusPolicy
+    Properties:
+      StatementId: !Sub "CloudWatchEventBusStatement-SourceAccount"
+      EventBusName: !Ref CloudWatchEventBus
+      Action: "events:PutEvents"
+      Principal: !Ref SourceAccountId
+
+  CustomEventBusPolicy: 
+    Type: AWS::Events::EventBusPolicy
+    Properties:
+      StatementId: !Sub "CustomEventBusStatement-SourceAccount"
+      EventBusName: !Ref CustomEventBus
+      Action: "events:PutEvents"
+      Principal: !Ref SourceAccountId
+
+  EventBridgeAlertingFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: eventbridge/eventbridge_alerting
+      Handler: app.lambda_handler
+      Runtime: python3.8
+      Events:
+        CloudWatchAlarmEvent:
+          Type: CloudWatchEvent # More info about CloudWatchEvent Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#cloudwatchevent
+          Properties:
+            EventBusName: EventBus-for-CloudWatchEvents
+            Pattern:
+              source:
+                - aws.cloudwatch
+              detail-type:
+                - CloudWatch Alarm State Change
+        CustomEvent:
+          Type: CloudWatchEvent
+          Properties:
+            EventBusName: EventBus-for-CustomEvents
+            Pattern:
+              source:
+                - "customevent"
+
+Outputs:
+  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
+  # Find out more about other implicit resources you can reference within SAM
+  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
+  EventBridgeAlertingFunction:
+    Description: "EventBridge Alerting Lambda Function ARN"
+    Value: !GetAtt EventBridgeAlertingFunction.Arn
+  EventBridgeAlertingFunctionIamRole:
+    Description: "Implicit IAM Role created for EventBridge Alerting function"
+    Value: !GetAtt EventBridgeAlertingFunction.Arn
+  CloudWatchEventBusARN:
+    Description: CloudWatch Events (EventBridge) Event Bus ARN. Use this as Input when creating the corresponding AppAccount stack
+    Value: !GetAtt CloudWatchEventBus.Arn
+  CustomEventBusARN:
+    Description: CloudWatch Events (EventBridge) Event Bus ARN. Use this as Input when creating the corresponding AppAccount stack
+    Value: !GetAtt CustomEventBus.Arn
+  AllowedAWSAccountIDs:
+    Description: Source Account Id sending AWS Events
+    Value: !Ref SourceAccountId
